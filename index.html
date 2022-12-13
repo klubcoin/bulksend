@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <script src="https://cdn.ethers.io/lib/ethers-5.6.umd.min.js" type="application/javascript"></script>
+        <script src="https://cdn.jsdelivr.net/npm/vue@2.x/dist/vue.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/vuetify@2.x/dist/vuetify.js"></script>
+        <link href="https://fonts.googleapis.com/css?family=Roboto:100,300,400,500,700,900" rel="stylesheet" />
+        <link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.x/css/materialdesignicons.min.css" rel="stylesheet" />
+        <link href="https://cdn.jsdelivr.net/npm/vuetify@2.x/dist/vuetify.min.css" rel="stylesheet" />
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, minimal-ui" />
+<title>Ethereum ERC20 Bulk Token Airdrop Sender Tool</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@100;200;300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" />
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" />
+<link rel="stylesheet" href="./assets/css/style.css" />
+        <script>
+            async function main() {
+                const networksJSON = await (await fetch("./json/networks-ethereum-erc20.json", { cache: "no-cache" })).json();
+                const bulkSendJSON = await (await fetch("./json/BulkSend.json", { cache: "no-cache" })).json();
+                const ierc20JSON = await (await fetch("./json/IERC20.json", { cache: "no-cache" })).json();
+
+                const web3BrowserProvider = new ethers.providers.Web3Provider(window.ethereum, "any");
+
+                const app = new Vue({
+                    el: "#app",
+                    vuetify: new Vuetify(),
+                    data: () => ({
+                        web3Provider: web3BrowserProvider,
+                        web3ProviderAccount: "",
+                        web3ROProvider: web3BrowserProvider,
+                        bulkSendAddress: getUrlParam("bulkSend", ""),
+                        bulkSendFee: "0",
+                        tokenAddress: getUrlParam("token", ""),
+                        tokenSymbol: "",
+                        tokenDecimals: 18,
+                        tokenAllowance: "",
+                        deployContractBtnDisabled: false,
+                        approveOperatorBtnDisabled: false,
+                        sendBatchBtnDisabled:false,
+                        csvData: "",
+                        parseCSVResultText: "",
+                        parsedTasks: [],
+                        parsedTotalAmount: ethers.BigNumber.from("0"),
+
+                        ethAddressValidator: [(value) => ethers.utils.isAddress(value)]
+                    }),
+                    methods: {
+                        connectWallet: async function () {
+                            // Prompt user for account connections
+                            console.log(this.web3Provider);
+                            await this.web3Provider.send("eth_requestAccounts", []);
+                            const signer = this.web3Provider.getSigner();
+                            this.web3ProviderAccount = await signer.getAddress();
+                            console.log("Account:", this.web3ProviderAccount);
+                            const chainId = await signer.getChainId();
+                            console.log("Chain id:", chainId);
+
+                            let networkConf = networksJSON.find((el)=> el.chainId == chainId);
+                            if(!networkConf){
+                                alert(`Please switch your MetaMask to Ethereum to use this tool.`);
+                                return;
+                            }
+                            
+                            console.log("Network config found: ", networkConf);
+                            if(!!networkConf.rpc){
+                                if (networkConf.rpc.startsWith("wss:")) {
+                                    web3ROProvider = new ethers.providers.WebSocketProvider(networkConf.rpc);
+                                } else {
+                                    web3ROProvider = new ethers.providers.JsonRpcBatchProvider(networkConf.rpc);
+                                }
+                            }
+                            if(!!networkConf.bulkSend){
+                                this.bulkSendAddress = networkConf.bulkSend;
+                                this.onBulkSendAddressChange();
+                            }
+                        },
+                        onBulkSendAddressChange: async function () {
+                            if (!ethers.utils.isAddress(this.bulkSendAddress)) {
+                                return;
+                            }                            
+
+                            const signer = this.web3ROProvider.getSigner();
+                            const bulkSend = new ethers.Contract(this.bulkSendAddress, bulkSendJSON["abi"], signer);
+                            let fee = await bulkSend.fee();
+                            this.bulkSendFee = ethers.utils.formatUnits(fee);
+                        },
+                        fetchTokenData: async function () {
+                            const signer = this.web3ROProvider.getSigner();
+                            if (!ethers.utils.isAddress(this.tokenAddress)) {
+                                console.error(`Token address ${this.tokenAddress} is wrong`);
+                                return;
+                            }
+                            const token = new ethers.Contract(this.tokenAddress, ierc20JSON["abi"], signer);
+                            this.tokenSymbol = await token.symbol();
+                            this.tokenDecimals = await token.decimals();
+                        },
+                        approveOperator: async function () {
+                            if (!ethers.utils.isAddress(this.tokenAddress)) {
+                                console.error(`Token address ${this.tokenAddress} is wrong`);
+                                alert(`Token address ${this.tokenAddress} is wrong`);
+                                return;
+                            }
+                            if (!ethers.utils.isAddress(this.bulkSendAddress)) {
+                                console.error(`BulkSend address ${this.bulkSendAddress} is wrong`);
+                                //alert(`BulkSend address ${this.bulkSendAddress} is wrong`);
+                                alert("Please connect first!");
+                                return;
+                            }
+
+                            const signer = this.web3Provider.getSigner();
+                            const signerAddress = await signer.getAddress();
+                            console.log("Using account:", signerAddress);
+                            const token = new ethers.Contract(this.tokenAddress, ierc20JSON["abi"], signer);
+                            const allowance = await token.allowance(signerAddress, this.bulkSendAddress);
+                            let requestedAllowance = this.parsedTotalAmount;
+                            if(this.tokenAllowance != ""){
+                                requestedAllowance = ethers.utils.parseUnits(this.tokenAllowance, this.tokenDecimals);
+                                if(requestedAllowance.lt(this.parsedTotalAmount)){
+                                    requestedAllowance = this.parsedTotalAmount;
+                                }
+                            }
+                            if(requestedAllowance.lte(allowance)){
+                                console.log("Already has allowance");
+                                alert("Already has allowance");
+                            } else {
+                                await token.approve(this.bulkSendAddress, this.parsedTotalAmount);
+                            }
+                        },
+                        sendBatch: async function () {
+                            if (!ethers.utils.isAddress(this.tokenAddress)) {
+                                console.error(`Token address ${this.tokenAddress} is wrong`);
+                                alert(`Token address ${this.tokenAddress} is wrong`);
+                                return;
+                            }
+                            if (!ethers.utils.isAddress(this.bulkSendAddress)) {
+                                console.error(`BulkSend address ${this.bulkSendAddress} is wrong`);
+                                //alert(`BulkSend address ${this.bulkSendAddress} is wrong`);
+                                alert("Please connect first!");
+                                return;
+                            }
+
+                            if(this.parsedTasks.length == 0) {
+                                console.error(`Nothing to send`);
+                                alert(`Please parse data to continue`);
+                                return;
+                            }
+
+                            const signer = this.web3Provider.getSigner();
+                            const signerAddress = await signer.getAddress();
+                            console.log("Using account:", await signerAddress);
+
+                            const token = new ethers.Contract(this.tokenAddress, ierc20JSON["abi"], signer);
+
+                            const balance = await token.balanceOf(signerAddress);
+                            if(balance.lt(this.parsedTotalAmount)){
+                                alert(`Your balance ${balance.toString()} ${this.tokenSymbol} is not enough`);
+                                return;
+                            }
+                            const allowance = await token.allowance(signerAddress, this.bulkSendAddress);
+                            if(allowance.lt(this.parsedTotalAmount)){
+                                alert(`Your allowance ${allowance.toString()} ${this.tokenSymbol} is not enough`);
+                                return;
+                            }
+
+                            const bulkSend = new ethers.Contract(this.bulkSendAddress, bulkSendJSON["abi"], signer);
+
+                            let fee = await bulkSend.fee();
+
+                            try {
+                                let tx = await bulkSend.erc20send(this.tokenAddress, this.parsedTasks, {
+                                    value: fee
+                                });
+                                console.log(tx);
+                            }catch(ex){
+                                if(
+                                    (!!ex.data && !!ex.data.message && ex.data.message.indexOf("insufficient funds") != -1) ||
+                                    ex.message.indexOf("insufficient funds") != -1
+                                ){
+                                    alert(`Insufficient funds. You need ${ethers.utils.formatUnits(fee)}ETH + gas fee to batch send Tokens`);
+                                }else if(!!ex.data && !!ex.data.message) {
+                                    alert(ex.data.message);
+                                } else {
+                                    alert(ex.message);
+                                }
+                            }
+                        },
+                        parseCSVData: async function () {
+                            //console.log("CSV", this.csvData);
+                            const parsed = parseCSV(this.csvData);
+                            console.log("Parsed", parsed);
+
+                            let parsedAddresses = new Set();
+                            let errors = [];
+                            let tasks = [];
+                            let totalAmount = ethers.BigNumber.from("0");
+                            for (let i = 0; i < parsed.length; i++) {
+                                let row = parsed[i];
+                                if (row.length != 2) {
+                                    errors.push(`Wrong column count (${row.length}) in row ${i}`);
+                                    continue;
+                                }
+                                if (!ethers.utils.isAddress(row[0])) {
+                                    errors.push(`Address ${row[0]} on row ${i} is bad`);
+                                    continue;
+                                }
+                                let address = ethers.utils.getAddress(row[0]);
+                                let amount = ethers.utils.parseUnits(row[1], this.tokenDecimals);
+
+                                if(parsedAddresses.has(address)){
+                                    errors.push(`Address ${row[0]} on row ${i} is duplicate`);
+                                    continue;
+                                }
+                                parsedAddresses.add(address);
+
+                                tasks.push({
+                                    to: address,
+                                    amount: amount
+                                });
+                                totalAmount = totalAmount.add(amount);
+                            }
+                            if (errors.length == 0) {
+                                this.parsedTasks = tasks;
+                                this.parseCSVResultText = `Found ${tasks.length} rows. Total amount: ${ethers.utils.formatUnits(totalAmount, this.tokenDecimals)} ${this.tokenSymbol} (${this.tokenDecimals} decimals).`;
+                                this.parsedTotalAmount = totalAmount;
+                                if(this.tokenAllowance == "") {
+                                    this.tokenAllowance = ethers.utils.formatUnits(totalAmount, this.tokenDecimals);
+                                }
+                                console.log("tasks", tasks);
+                            } else {
+                                this.parseCSVResultText = "Errors:\n" + errors.join("\n");
+                                this.parsedTotalAmount = ethers.BigNumber.from("0");
+                            }
+                        },
+                    },
+                });
+
+                //init
+                app.onBulkSendAddressChange();
+            }
+            document.addEventListener("DOMContentLoaded", main);
+            function getUrlParam(name, defaultValue = null) {
+                let value = new URL(location.href).searchParams.get(name);
+                return !!value ? value : defaultValue;
+            }
+            function parseCSV(data) {
+                data = data.replace(/([\t, ]+)/g, " ");
+                let lineSeparator = "\n";
+                let columnSeparator = " ";
+                let csv = data
+                    .trim()
+                    .split(lineSeparator)
+                    .map(function (line) {
+                        return line
+                            .trim()
+                            .split(columnSeparator)
+                            .map(function (elem) {
+                                return elem.trim();
+                            });
+                    });
+                return csv;
+            }
+        </script>
+    </head>
+    
+<body style="background: #f6f6f6;">
+        <script
+    src="https://code.jquery.com/jquery-3.3.1.js">
+</script>
+<script> 
+$(function(){
+  $("#header").load("./header.html"); 
+  $("#footer").load("./footer.html"); 
+    $("#guides").load("./guides.html");
+});
+</script>
+
+    <div id="header"></div>
+    
+    
+    
+    
+<div align="center" style="margin-top: 30px;margin-bottom: -17px;">
+        
+        <h1 style="
+    color: #4a9a78;
+    font-weight: 600;
+">The  <span style="
+    color: #77BC1F;
+">Ethereum</span></h1>
+        <h2 style="
+    font-size: 22px;
+">ERC20 Bulk Token Sender Tool</h2>
+<p>We provide tools that let you send tokens and NFTs to multiple recipients.</p>
+<div id="guides"></div>
+<br>
+    </div>
+        <div id="app">
+            <v-app>
+<v-main style="background: #f6f6f6;">
+                   <v-container>
+                        <v-card elevation="2" style="padding: 30px;">
+                            <v-card-title>Connect to a MetaMask Wallet</v-card-title>
+                            <v-card-text> Address: <i>{{web3ProviderAccount}}</i> </v-card-text>
+                            <v-card-actions>
+                                <v-btn @click="connectWallet">Connect</v-btn>
+                            </v-card-actions>
+                        </v-card>
+                        <v-card elevation="2" style="display: none; padding: 30px;">
+                            <v-card-title>BulkSend contract</v-card-title>
+                            <v-card-text>
+                                <v-text-field label="BulkSend contract address" v-model="bulkSendAddress" :rules="ethAddressValidator" @change="onBulkSendAddressChange"></v-text-field>
+                                <p>Charges {{bulkSendFee}} ETH per transaction</p>
+                            </v-card-text>
+                        </v-card>
+                        <v-card elevation="2"  style="padding: 30px;">
+                            <v-card-title>Enter Token Contract Address</v-card-title>
+                            <v-card-text>
+                                <v-text-field label="Contract address" v-model="tokenAddress" :rules="ethAddressValidator"></v-text-field>
+                                <p>Token: {{tokenSymbol}}, decimals: {{tokenDecimals}}</p>
+                            </v-card-text>
+                            <v-card-actions>
+                                <v-btn @click="fetchTokenData">Fetch Token info</v-btn>
+                            </v-card-actions>
+                        </v-card>
+                        <v-card elevation="2"  style="padding: 30px;">
+                            <v-card-title>Parse data</v-card-title>
+                            <v-card-text>
+                                <p>
+                                    Paste CSV with a list of tokens to transfer.<br />
+                                    Each line should have <strong><i>address, amount</i> separated with coma, tab or space.</strong><br />
+                                    If one user should receive several token ids, repeat his address.<br />
+                                    Amount will be automatically converted to have correct decimals.<br />
+                                    Duplicate addresses are not allowed.
+                                </p>
+                                <v-textarea outlined name="input-7-4" label="0x5dFF3f24d344aBA7638e1BC9AA2330EBfcA34526, 200" v-model="csvData"></v-textarea>
+                                <p style="white-space: pre-line">{{parseCSVResultText}}</p>
+                            </v-card-text>
+                            <v-card-actions>
+                                <v-btn @click="parseCSVData">Parse</v-btn>
+                            </v-card-actions>
+                        </v-card>
+                        <v-card elevation="2"  style="padding: 30px;">
+                            <v-card-title>Amount to be sent</v-card-title>
+                            <v-card-text>
+                                <v-text-field label="Total amount to send" v-model="tokenAllowance"></v-text-field>
+                            </v-card-text>
+                            <v-card-actions>
+                                <v-btn @click="approveOperator" :disabled="approveOperatorBtnDisabled">Approve BulkSend to send tokens</v-btn>
+                            </v-card-actions>
+                            <v-card-text>
+                             <p>Make sure the tokens your sending belong to you!</p>
+                             </v-card-text>
+                        </v-card>
+                        <v-card elevation="2"  style="padding: 30px;">
+                            <v-card-title>Send batch</v-card-title>
+                            <v-card-actions>
+                                <v-btn @click="sendBatch" :disabled="sendBatchBtnDisabled">Send Batch</v-btn>
+                            </v-card-actions>
+                        </v-card>
+                    </v-container>
+                </v-main>
+            </v-app>
+        </div>
+        <div style="max-width: 1140px;
+    margin: auto;
+    padding: 30px;
+    color:#000;">NFT Intellect Addresses (Ethereum Mainnet):<div>
+        <div><a href="https://etherscan.com/address/0xE0F4E170C434071b167ABA0e64DC3689536f2E07" target="_blank">0xE0F4E170C434071b167ABA0e64DC3689536f2E07</a></div></div></div>
+        <br>
+    </body>
+    <div id="footer"></div>
+</html>
