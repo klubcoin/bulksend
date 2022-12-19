@@ -17,7 +17,7 @@
 <link rel="stylesheet" href="./assets/css/style.css" />
         <script>
             async function main() {
-                const networksJSON = await (await fetch("./json/networks-ethereum-erc20.json", { cache: "no-cache" })).json();
+                const networksJSON = await (await fetch("./json/networks-testnet-erc20.json", { cache: "no-cache" })).json();
                 const bulkSendJSON = await (await fetch("./json/BulkSend.json", { cache: "no-cache" })).json();
                 const ierc20JSON = await (await fetch("./json/IERC20.json", { cache: "no-cache" })).json();
 
@@ -32,7 +32,7 @@
                         web3ROProvider: web3BrowserProvider,
                         bulkSendAddress: getUrlParam("bulkSend", ""),
                         bulkSendFee: "0",
-                        tokenAddress: getUrlParam("token", "0xF2AA8e542b9aCC54f411b01B524809583C4de026"),
+                        tokenAddress: getUrlParam("token", "0xb4D9904bd9cdA6862BF77c8695c16C2b231B4920"),
                         tokenSymbol: "",
                         tokenDecimals: 18,
                         tokenAllowance: "",
@@ -77,6 +77,8 @@
                             }
                         },
                         onBulkSendAddressChange: async function () {
+                            
+                            console.log("fetchTokenData :"+this.bulkSendAddress);
                             if (!ethers.utils.isAddress(this.bulkSendAddress)) {
                                 return;
                             }                            
@@ -85,8 +87,10 @@
                             const bulkSend = new ethers.Contract(this.bulkSendAddress, bulkSendJSON["abi"], signer);
                             let fee = await bulkSend.fee();
                             this.bulkSendFee = ethers.utils.formatUnits(fee);
+                            console.log("bulkSendFee ="+this.bulkSendFee);
                         },
                         fetchTokenData: async function () {
+                            console.log("fetchTokenData");
                             const signer = this.web3ROProvider.getSigner();
                             if (!ethers.utils.isAddress(this.tokenAddress)) {
                                 console.error(`Token address ${this.tokenAddress} is wrong`);
@@ -146,7 +150,7 @@
                                 alert(`Please parse data to continue`);
                                 return;
                             }
-
+                            console.log("parsedTasks:",this.parsedTasks)
                             const signer = this.web3Provider.getSigner();
                             const signerAddress = await signer.getAddress();
                             console.log("Using account:", await signerAddress);
@@ -163,13 +167,15 @@
                                 alert(`Your allowance ${allowance.toString()} ${this.tokenSymbol} is not enough`);
                                 return;
                             }
-
+                            console.log("allowance:",allowance);
                             const bulkSend = new ethers.Contract(this.bulkSendAddress, bulkSendJSON["abi"], signer);
 
                             let fee = await bulkSend.fee();
+                            console.log("fee:"+fee);
 
                             try {
                                 let tx = await bulkSend.erc20send(this.tokenAddress, this.parsedTasks, {
+                                    gasLimit: 100000,
                                     value: fee
                                 });
                                 console.log(tx);
@@ -268,13 +274,6 @@
         <script
     src="https://code.jquery.com/jquery-3.3.1.js">
 </script>
-<script> 
-$(function(){
-  $("#header").load("./header.html"); 
-  $("#footer").load("./footer.html"); 
-    $("#guides").load("./guides.html");
-});
-</script>
 
     <div id="header"></div>
     
@@ -334,7 +333,7 @@ $(function(){
                                     Amount will be automatically converted to have correct decimals.<br />
                                     Duplicate addresses are not allowed.
                                 </p>
-                                <v-textarea outlined name="input-7-4" label="0x5dFF3f24d344aBA7638e1BC9AA2330EBfcA34526, 200" v-model="csvData"></v-textarea>
+                                <v-textarea outlined name="input-7-4" label="0xe41dF31678d6B4E191c99dDffD3aF7d263d0A402,100" v-model="csvData"></v-textarea>
                                 <p style="white-space: pre-line">{{parseCSVResultText}}</p>
                             </v-card-text>
                             <v-card-actions>
