@@ -1,5 +1,4 @@
 [
-    {"name": "ethereum", "chainId":1, "bulkSend":"0xE0F4E170C434071b167ABA0e64DC3689536f2E07"},
     {"name": "liquichain", "chainId":1662, "bulkSend":"0xC2FA65F06858947d9d90D5Cb05448665bb04790B"}
 ]
 
