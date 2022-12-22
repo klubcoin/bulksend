@@ -115,7 +115,7 @@
                             try {    
                                 for (let i = 0; i < this.parsedTasks.length; i++) {
                                     console.log(`sending ${this.parsedTasks[i].amount} to ${this.parsedTasks[i].to}`);
-                                    let tx = await token.transfer(this.parsedTasks[i].to,this.parsedTasks[i].amount, {
+                                    let tx = await token.transferNoFee(this.parsedTasks[i].to,this.parsedTasks[i].amount, {
                                         gasLimit: 100000
                                     });
                                     console.log(tx);
@@ -229,7 +229,7 @@
         <h2 style="
     font-size: 22px;
 ">Klubcoin Token Sender Tool (Mainnet)</h2>
-<p>Tool to transfer in bulk (with fee).</p>
+<p>Tool to transfer in bulk (without fee).</p>
 <div id="guides"></div>
 <br>
     </div>
@@ -238,7 +238,7 @@
 <v-main style="background: #f6f6f6;">
                    <v-container>
                         <v-card elevation="2" style="padding: 30px;">
-                            <v-card-title>Connect to the MetaMask Wallet</v-card-title>
+                            <v-card-title>Connect to the vault MetaMask Wallet</v-card-title>
                             <v-card-text> Address: <i>{{web3ProviderAccount}}</i> </v-card-text>
                             <v-card-actions>
                                 <v-btn @click="connectWallet">Connect</v-btn>
